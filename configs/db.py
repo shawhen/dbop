@@ -4,8 +4,10 @@
 
 from .switches import *
 
-driver_mysql = 0
-driver = driver_mysql
+import drivers
+
+
+driver = drivers.driver_redis
 
 host = "redis.qd.shawhen.me"
 port = 6379
@@ -20,8 +22,14 @@ elif debug is True:
 else:
     db = __dbbase__
 
-if driver == driver_mysql:
+if driver == drivers.driver_mysql:
     from tornado_mysql import pools
+
     pool = pools.Pool({"host": host, "port": port, "user": user, "passwd": passwd, "db": db})
+elif driver == drivers.driver_redis:
+    import redis
+
+    red = redis.Redis(host, port)
+
 else:
     raise NotImplemented
