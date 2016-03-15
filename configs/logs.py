@@ -4,5 +4,5 @@
 
 import logbook
 
-logpath = "log.log"
+logpath = "logs/log.log"
 loglevel = logbook.TRACE

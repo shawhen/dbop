@@ -43,7 +43,7 @@ def update(dbname, tname, opcols, oplockcols, matchcols, cols):
     :param opcols:
     :param oplockcols:
     :param matchcols:
-    :return: 相应字段pos操作的返回值
+    :return: {pos: value}
     """
     LOG.debug("|-update {0}:{1}, opcols: {2}, oplockcols: {3}, matchcols: {4}"
               .format(dbname, tname, opcols, oplockcols, matchcols))
@@ -52,20 +52,20 @@ def update(dbname, tname, opcols, oplockcols, matchcols, cols):
     LOG.debug("|-redis full key for hmset: {0}".format(fullkey4hmset))
     hmsetkv = {}
     msetkv = {}
-    ret = {}
+    ret = {}  # pos: value
     for opcol_name, opcol_value, opcol_opcode in opcols:
         opcolctx = cols[opcol_name]  # store type, pos, data type
 
         if opcolctx[0] == col_stype_bare:
             if opcol_opcode == popc_assign:  # =
-                key = fullkey4hmset+b"-"+opcol_name.encode()
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
                 msetkv[key] = opcol_value
             elif opcol_opcode == popc_add:  # +
-                key = fullkey4hmset+b"-"+opcol_name.encode()
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
                 LOG.debug("|-incrby: key({0}) value({1})".format(key, opcol_value))
                 ret[opcolctx[1]] = m_configs_db.red.incrby(key, opcol_value)
             elif opcol_opcode == popc_sub:  # -
-                key = fullkey4hmset+b"-"+opcol_name.encode()
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
                 LOG.debug("|-incrby: key({0}) value({1})".format(key, -opcol_value))
                 ret[opcolctx[1]] = m_configs_db.red.incrby(key, -opcol_value)
             else:
@@ -83,32 +83,48 @@ def update(dbname, tname, opcols, oplockcols, matchcols, cols):
                 raise NotImplemented
         elif opcolctx[0] == col_stype_list:
             if opcol_opcode == popc_extend:
-                key = fullkey4hmset+b"-"+opcol_name.encode()
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
                 LOG.debug("|-rpush key({0}) values({1})".format(key, opcol_value))
                 ret[opcolctx[1]] = m_configs_db.red.rpush(key, *opcol_value)
             elif opcol_opcode == popc_remove:
-                key = fullkey4hmset+b"-"+opcol_name.encode()
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
                 LOG.debug("|-lrem key({0}) value({1}) count(1)".format(key, opcol_value))
-                ret[opcolctx[1]] = m_configs_db.red.lrem(key, opcol_value, 1)
+                for opcol_valuei in opcol_value:
+                    ret[opcolctx[1]] = m_configs_db.red.lrem(key, 0, opcol_valuei)
+            elif opcol_opcode == popc_assign:
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
+                LOG.debug("|-list assign key({0}) values({1})".format(key, opcol_value))
+                m_configs_db.red.delete(key)
+                if len(opcol_value) != 0:
+                    m_configs_db.red.rpush(key, *opcol_value)
             else:
                 raise NotImplemented
         elif opcolctx[0] == col_stype_set:
-            if opcol_opcode == popc_sadd:
-                key = fullkey4hmset+b"-"+opcol_name.encode()
+            if opcol_opcode == popc_sadd or opcol_opcode == popc_extend:
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
                 LOG.debug("|-sadd key({0}) values({1})".format(key, opcol_value))
-                ret[opcolctx[1]] = m_configs_db.red.sadd(key, *opcol_value)
-            elif opcol_opcode == popc_sremove:
-                key = fullkey4hmset+b"-"+opcol_name.encode()
+                if len(opcol_value) != 0:
+                    ret[opcolctx[1]] = m_configs_db.red.sadd(key, *opcol_value)
+            elif opcol_opcode == popc_sremove or opcol_opcode == popc_remove:
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
                 LOG.debug("|-srem key({0}) values({1})".format(key, opcol_value))
                 ret[opcolctx[1]] = m_configs_db.red.srem(key, *opcol_value)
+            elif opcol_opcode == popc_assign:
+                key = make_orphankey(dbname, tname, opcol_name, matchkey)
+                LOG.debug("|-set assign key({0}) values({1})".format(key, opcol_value))
+                m_configs_db.red.delete(key)
+                if len(opcol_value) != 0:
+                    ret[opcolctx[1]] = m_configs_db.red.sadd(key, *opcol_value)
             else:
                 raise NotImplemented
+        else:
+            raise ValueError("unsupported opcolctx:", opcolctx)
     LOG.debug("|-hmsetkv: {0}".format(hmsetkv))
     LOG.debug("|-msetkv: {0}".format(msetkv))
     if len(hmsetkv) != 0:
-        ret["#".join(map(lambda keyname: cols[keyname][1], hmsetkv.keys()))] = m_configs_db.red.hmset(fullkey4hmset, hmsetkv)
+        ret["#".join(map(lambda keyname: str(cols[keyname][1]), hmsetkv.keys()))] = m_configs_db.red.hmset(fullkey4hmset, hmsetkv)
     if len(msetkv) != 0:
-        ret["&".join(map(lambda keyname: cols[keyname][1], msetkv.keys()))] = m_configs_db.red.mset(**msetkv)
+        ret["&".join(map(lambda keyname: str(cols[keyname][1]), msetkv.keys()))] = m_configs_db.red.mset(**msetkv)
     LOG.debug("|-ret: {0}".format(ret))
 
     return ret
@@ -136,7 +152,7 @@ def get(dbname, tname, getcols, matchcols, cols):
     :param getcols:
     :param matchcols:
     :param cols: [(col_stype, pos, value_type)]
-    :return:
+    :return: {pos: value}
     """
     if len(getcols) == 0:
         getcols = tuple(cols.keys())
@@ -163,16 +179,15 @@ def get(dbname, tname, getcols, matchcols, cols):
                 setkeykw[orphankey] = colname
             elif colctx[0] == col_stype_sset:
                 ssetkeykw[orphankey] = colname
-    values = []
-    colkv = {}  # col name: col value
+    colpv = {}  # col pos: col value
     if len(hmgetfields) != 0:
         hmgetvalues = m_configs_db.red.hmget(hmgetkey, hmgetfields)
         for hmgetfield, hmgetvalue in zip(hmgetfields, hmgetvalues):
             colctx = cols[hmgetfield]
             if colctx[2] == vt_integer:
-                colkv[colctx[1]] = int(hmgetvalue) if hmgetvalue is not None else 0
+                colpv[colctx[1]] = int(hmgetvalue) if hmgetvalue is not None else 0
             elif colctx[2] == vt_text:
-                colkv[colctx[1]] = hmgetvalue.decode() if hmgetvalue is not None else ""
+                colpv[colctx[1]] = hmgetvalue.decode() if hmgetvalue is not None else ""
             else:
                 raise ValueError("unsupported col ctx:", colctx, "hmgetfield:", hmgetfield, " hmgetvalue:", hmgetvalue)
     if len(barekeykw) != 0:
@@ -181,9 +196,9 @@ def get(dbname, tname, getcols, matchcols, cols):
         for barekey, barevalue in zip(barekeys, barevalues):
             colctx = cols[barekeykw[barekey]]
             if colctx[2] == vt_integer:
-                colkv[colctx[1]] = int(barevalue) if barevalue is not None else 0
+                colpv[colctx[1]] = int(barevalue) if barevalue is not None else 0
             elif colctx[2] == vt_text:
-                colkv[colctx[1]] = barevalue.decode() if barevalue is not None else ""
+                colpv[colctx[1]] = barevalue.decode() if barevalue is not None else ""
             else:
                 raise ValueError("unsupported col ctx:", colctx, "bare key:", barekey, "bare value:", barevalue)
     for listkeyk, listkeycol in listkeykw.items():
@@ -195,7 +210,7 @@ def get(dbname, tname, getcols, matchcols, cols):
             listkeyvalues = tuple(map(lambda lv: lv.decode(), listkeyvalues))
         else:
             raise ValueError("unsupported col ctx:", colctx, "list key:", listkeyk, "list value:", listkeyvalues)
-        colkv[colctx[1]] = listkeyvalues
+        colpv[colctx[1]] = listkeyvalues
     for setkeyk, setkeycol in setkeykw.items():
         colctx = cols[setkeycol]
         setkeyvalues = m_configs_db.red.smembers(setkeyk)
@@ -205,7 +220,7 @@ def get(dbname, tname, getcols, matchcols, cols):
             setkeyvalues = tuple(map(lambda sv: sv.decode(), setkeyvalues))
         else:
             raise ValueError("unsupported col ctx:", colctx, "set key:", setkeyk, "set value:", setkeyvalues)
-        colkv[colctx[1]] = list(setkeyvalues)
+        colpv[colctx[1]] = list(setkeyvalues)
     for ssetkeyk, ssetkeycol in ssetkeykw.items():
         colctx = cols[ssetkeycol]
         ssetkeyvalues = m_configs_db.red.zrange(ssetkeyk, 0, -1)
@@ -215,9 +230,6 @@ def get(dbname, tname, getcols, matchcols, cols):
             ssetkeyvalues = tuple(map(lambda ssv: ssv.decode(), ssetkeyvalues))
         else:
             raise ValueError("unsupported col ctx:", colctx, "sset key:", ssetkeyk, "sset value:", ssetkeyvalues)
-        colkv[colctx[1]] = list(ssetkeyvalues)
+        colpv[colctx[1]] = list(ssetkeyvalues)
 
-    for pos in sorted(colkv.keys()):
-        v = colkv[pos]
-        values.append(v)
-    return values
+    return colpv

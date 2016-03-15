@@ -9,12 +9,12 @@ import drivers
 
 driver = drivers.driver_redis
 
-host = "redis.qd.shawhen.me"
+host = "localhost"
 port = 6379
 user = "root"
-passwd = "MyMac2015"
+passwd = "password"
 
-__dbbase__ = "wealthempire"
+__dbbase__ = "database"
 if develop is True:
     db = __dbbase__ + "_develop"
 elif debug is True:
@@ -32,4 +32,4 @@ elif driver == drivers.driver_redis:
     red = redis.Redis(host, port)
 
 else:
-    raise NotImplemented
+    raise NotImplementedError("unsupported driver:", driver)

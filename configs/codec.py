@@ -35,7 +35,7 @@ popc_replace = 103
 
 # for list
 popc_extend = 201  # append some values at the tail
-popc_remove = 202  # remove a value from left2right
+popc_remove = 202  # remove some values from left2right
 
 # for set
 popc_sadd = 51  # add some values into the set

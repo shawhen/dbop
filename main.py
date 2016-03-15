@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # @author: zig(shawhen2012@hotmail.com)
 
+import sys
 import json
 import logbook
 
@@ -222,11 +223,7 @@ class DBOPServer(tcpserver.TCPServer):
                                 else:
                                     payload = (str(errno_column_not_found)+"|"+dbname+":"+tablename+":"+str(getcol_name)).encode()
                                     raise ValueError("get column not found:", getcol_name, "@tablename:", tablename, "@dbname:", dbname)
-                            payload_opcode = payload[baseoffset]
-
-                            opcol_value, opcol_value_consumed = parse_value(payload, baseoffset)
-                            baseoffset += opcol_value_consumed
-                            getcols.append((getcol_name, opcol_value, payload_opcode))
+                            getcols.append(getcol_name)
                         LOG.debug("getcols: {0}".format(getcols))
                     else:
                         raise NotImplemented
@@ -272,19 +269,23 @@ class DBOPServer(tcpserver.TCPServer):
                 import traceback
                 traceback.print_exc()
                 LOG.exception(traceback.format_exc())
+                payload = b"102|"+json.dumps(traceback.format_exc()).encode()
             finally:
                 header = (struct.pack(">LB", len(payload), op_code)).ljust(10)
                 try:
+                    LOG.debug("|-payload: {0}".format(payload))
                     yield stream.write(header+payload)
                 except iostream.StreamClosedError:
                     pass
 
 if __name__ == "__main__":
-    @gen.coroutine
-    def test():
-        yield m_configs_db.pool.execute("UPDATE `wealthempire_develop`.`users` SET `corporations`=%s", b'x03x00x0bx00x00x08x00x00x00x00x00x00x00x02')
-
-    io_loop = ioloop.IOLoop.current()
-    dbopserver = DBOPServer()
-    dbopserver.listen(32000)
-    io_loop.start()
+    import sys
+    if len(sys.argv) != 2:
+        print("script listen_port")
+    else:
+        listen_port = int(sys.argv[1])
+        
+        io_loop = ioloop.IOLoop.current()
+        dbopserver = DBOPServer()
+        dbopserver.listen(listen_port)
+        io_loop.start()
