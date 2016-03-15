@@ -2,5 +2,5 @@
 # -*- coding: utf-8 -*-
 # @author: zig(shawhen2012@hotmail.com)
 
-develop = True
-debug = True
+develop = False
+debug = False

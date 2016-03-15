@@ -3,3 +3,4 @@ tornado_mysql
 redis
 requests
 logbook
+supervisor
