@@ -280,7 +280,8 @@ class DBOPServer(tcpserver.TCPServer):
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) != 2:
+    # script listen_port
+    if len(sys.argv) != 1:
         print("script listen_port")
     else:
         listen_port = int(sys.argv[1])
