@@ -5,6 +5,7 @@
 import sys
 import json
 import logbook
+import argparse
 
 from tornado import ioloop
 from tornado import iostream
@@ -278,15 +279,38 @@ class DBOPServer(tcpserver.TCPServer):
                 except iostream.StreamClosedError:
                     pass
 
-if __name__ == "__main__":
-    import sys
-    # script listen_port
-    if len(sys.argv) != 1:
-        print("script listen_port")
+
+def boot(listen_port, node, db_host, db_port):
+    """
+
+    :param listen_port:
+    :param node: redis/mysql
+    :param db_host:
+    :param db_port:
+    :param kwargs:
+    :return:
+    """
+    if node == "redis":
+        m_configs_db.driver = drivers.driver_redis
+    elif node == "mysql":
+        m_configs_db.driver = drivers.driver_mysql
     else:
-        listen_port = int(sys.argv[1])
-        
-        io_loop = ioloop.IOLoop.current()
-        dbopserver = DBOPServer()
-        dbopserver.listen(listen_port)
-        io_loop.start()
+        raise ValueError("unsupported node type:", node)
+    m_configs_db.host = db_host
+    m_configs_db.port = db_port
+    m_configs_db.init()
+
+    io_loop = ioloop.IOLoop.current()
+    dbopserver = DBOPServer()
+    dbopserver.listen(listen_port)
+    io_loop.start()
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--listen_port", help="the listen port")
+    parser.add_argument("--node", help="redis op or mysql op")
+    parser.add_argument("--dbhost", help="the real database's host")
+    parser.add_argument("--dbport", help="the real database's port")
+    args = parser.parse_args()
+
+    boot(args.listen_port, args.node, args.dbhost, args.dbport)

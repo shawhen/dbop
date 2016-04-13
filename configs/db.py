@@ -22,14 +22,20 @@ elif debug is True:
 else:
     db = __dbbase__
 
-if driver == drivers.driver_mysql:
-    from tornado_mysql import pools
+red = None
 
-    pool = pools.Pool({"host": host, "port": port, "user": user, "passwd": passwd, "db": db})
-elif driver == drivers.driver_redis:
-    import redis
 
-    red = redis.Redis(host, port)
+def init():
+    global red
 
-else:
-    raise NotImplementedError("unsupported driver:", driver)
+    if driver == drivers.driver_mysql:
+        from tornado_mysql import pools
+
+        pool = pools.Pool({"host": host, "port": port, "user": user, "passwd": passwd, "db": db})
+    elif driver == drivers.driver_redis:
+        import redis
+
+        red = redis.Redis(host, port)
+
+    else:
+        raise NotImplementedError("unsupported driver:", driver)

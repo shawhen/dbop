@@ -4,3 +4,6 @@ redis
 requests
 logbook
 supervisor
+greenlet
+gevent
+flask
