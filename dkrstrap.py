@@ -43,12 +43,12 @@ def setup():
 
         if dbop_server_p is not None:
             dbop_server_p.terminate()
-        dbop_server_p = subprocess.Popen("python3.5 main.py --listen_port {listen_port} --node {node} --dbhost {dbhost} --dbport {dbport}"
+        dbop_server_p = subprocess.Popen("python3.4 main.py --listen_port {listen_port} --node {node} --dbhost {dbhost} --dbport {dbport}"
                                          .format(listen_port=listen_port, node=node, dbhost=db_host, dbport=db_port), shell=True)
 
         if slavep is not None:
             slavep.terminate()
-        slavep = subprocess.Popen("python3.5 slave.py --host {host} --port {port} --whost localhost --wport 22 --type red --iid {iid}"
+        slavep = subprocess.Popen("python3.4 slave.py --host {host} --port {port} --whost localhost --wport 22 --type red --iid {iid}"
                                   .format(host=args.lcx_host, port=args.lcx_port, iid="ssh_dr_docker_dbop_redis"+"_"+str(listen_port)),
                                   cwd="slave", shell=True)
     except:
