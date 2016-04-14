@@ -3,7 +3,6 @@ tornado_mysql
 redis
 requests
 logbook
-supervisor
 greenlet
 gevent
 flask
