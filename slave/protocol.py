@@ -7,7 +7,7 @@ protocol_version = (2, 0, 0)  # major minor fix
 pkg_header_size = 10
 pkg_header_format = ">LL2s"  # payload-len peer-id command
 
-keeplive_gap = 30
+keeplive_gap = 180
 
 peerid4s = 1  # slave report version
 peerid4a = 2  # adapter report version

@@ -3,6 +3,8 @@
 # @author: zig(shawhen2012@hotmail.com)
 
 import os
+import sys
+import time
 import errno
 import struct
 import logbook
@@ -10,6 +12,7 @@ import argparse
 import functools
 
 import gevent
+from gevent import lock as m_g_lock
 from gevent import socket as m_socket
 
 from protocol import *
@@ -21,8 +24,7 @@ LOG = logbook.Logger("***Slave***")
 
 def slave(internal_host, internal_port, worker_host, worker_port, ptype, iid, *args, **kwargs):
     print("|-internal host:", internal_host, "internal port:", internal_port,
-          "worker host:", worker_host, "worker port:", worker_port, "port type:", ptype, "iid:", iid,
-          "args:", args, "kwargs:", kwargs)
+          "worker host:", worker_host, "worker port:", worker_port)
     try:
         os.makedirs("logs")
     except OSError as e:
@@ -46,9 +48,10 @@ def shadow_co(peer, lpeer, peerid, shared_ctx, slavelet):
 
     LOG.debug("|-serve a peer<{0}>(id: {1})".format(peer, peerid))
 
+    lpeer_o_lock = shared_ctx["lpeer_o_lock"]
     while True:
         try:
-            dp = peer.recv(40960)
+            dp = peer.recv(4096000)
             if len(dp) == 0:
                 __shadow_close_cb__(peer, peerid, lpeer, shared_ctx, slavelet)
                 break
@@ -60,17 +63,20 @@ def shadow_co(peer, lpeer, peerid, shared_ctx, slavelet):
                 raise
 
         lheader_dp = struct.pack(pkg_header_format, len(dp), peerid, b"DP")
-        lpeer.sendall(lheader_dp+dp)
+        with lpeer_o_lock:
+            lpeer.sendall(lheader_dp+dp)
 
 
 def __shadow_close_cb__(peer, peerid, lpeer, shared_ctx, slavelet):
     LOG.debug("|-shadow closed, peer: {0}, peerid: {1}".format(peer, peerid))
+    lpeer_o_lock = shared_ctx["lpeer_o_lock"]
     if peerid in shared_ctx["eshadowpeers"]:
         del shared_ctx["eshadowpeers"][peerid]
 
         lheader_lc = struct.pack(pkg_header_format, 0, peerid, b"LC")
         try:
-            lpeer.sendall(lheader_lc)
+            with lpeer_o_lock:
+                lpeer.sendall(lheader_lc)
         except m_socket.error as e:
             if e.errno == errno.EBADF:
                 slavelet.kill(e)
@@ -85,15 +91,24 @@ def __slave_close_cb__(shared_ctx, let=None):
 
 
 def slave_co(ihost, iport, whost, wport, ptype, iid, *args, **kwargs):
-    def keep_live_deadline_cb(let):
-        LOG.debug("|-slave sock has reached deadline")
-        let.kill()
+    def keeplive_co(deadline, shared_ctx, lpeer):
+        while True:
+            delay = shared_ctx["delay"]
+            checkpoint = shared_ctx["checkpoint"]
+            if checkpoint + delay < deadline:
+                LOG.debug("|-****listener sock has reached deadline****-|")
+                lpeer.close()
+
+                break
+            else:
+                deadline = checkpoint + delay
+
+                gevent.sleep(delay)
 
     clet = gevent.getcurrent()
 
     lpeer = m_socket.socket()
     lpeer.connect((ihost, iport))
-    print("connected to ", ihost, iport)
     # report version
     protocol_version_b = (str(protocol_version[0])+"."+str(protocol_version[1])+"."+str(protocol_version[2])).encode()
     lheader_rv = struct.pack(pkg_header_format, len(protocol_version_b), peerid4s, b"RV")
@@ -123,63 +138,58 @@ def slave_co(ihost, iport, whost, wport, ptype, iid, *args, **kwargs):
         raise ValueError("ID(iid: {0}) duplicated".format(iid))
     else:  # identity error
         raise ValueError("ID(iid: {0}) response failed:".format(iid), lheader_iid)
-    print("everything is ok")
 
-    shared_ctx = {"eshadowpeers": {}}
+    lpeer_o_lock = m_g_lock.BoundedSemaphore()
+    shared_ctx = {"eshadowpeers": {}, "lpeer_o_lock": lpeer_o_lock, "checkpoint": time.time(), }  # delay
     clet.link_exception(functools.partial(__slave_close_cb__, shared_ctx))
-    kl_deadline = None
-    try:
-        while True:
-            lheader = recvexactly(lpeer, pkg_header_size)
-            lpayload_len, epeerid, lcmd = struct.unpack(pkg_header_format, lheader)
-            lpayload = recvexactly(lpeer, lpayload_len)
-            print("|-listener header:", lheader, "listener payload len:", len(lpayload))
-            if lcmd == b"NC":  # new connection
-                LOG.debug("|-new connection come, id: {0}".format(epeerid))
-                try:
-                    epeer = m_socket.socket()
-                    epeer.connect((whost, wport))
-                    shared_ctx["eshadowpeers"][epeerid] = epeer
-                    gevent.spawn(shadow_co, epeer, lpeer, epeerid, shared_ctx, clet)
-                    LOG.debug("|made a connection to worker({0}:{1})".format(whost, wport))
-                except m_socket.error as e:
-                    LOG.debug("|-connect worker failed, connection(id: {0}) lost".format(epeerid))
+    keeplive_let = None
+    while True:
+        lheader = recvexactly(lpeer, pkg_header_size)
+        lpayload_len, epeerid, lcmd = struct.unpack(pkg_header_format, lheader)
+        lpayload = recvexactly(lpeer, lpayload_len)
 
-                    import traceback
-                    traceback.print_exc()
-                    LOG.exception(traceback.format_exc())
+        shared_ctx["checkpoint"] = time.time()
 
-                    LOG.debug("|-send LC({0}) to listener({1})".format(epeerid, lpeer))
-                    lheader_lc = struct.pack(pkg_header_format, 0, epeerid, b"LC")
+        print("|-listener header:", lheader, "listener payload len:", len(lpayload))
+        if lcmd == b"NC":  # new connection
+            LOG.debug("|-new connection come, id: {0}".format(epeerid))
+            try:
+                epeer = m_socket.socket()
+                epeer.connect((whost, wport))
+                shared_ctx["eshadowpeers"][epeerid] = epeer
+                gevent.spawn(shadow_co, epeer, lpeer, epeerid, shared_ctx, clet)
+                LOG.debug("|made a connection to worker({0}:{1})".format(whost, wport))
+            except m_socket.error as e:
+                LOG.debug("|-connect worker failed, connection(id: {0}) lost".format(epeerid))
+
+                import traceback
+                traceback.print_exc()
+                LOG.exception(traceback.format_exc())
+
+                LOG.debug("|-send LC({0}) to listener({1})".format(epeerid, lpeer))
+                lheader_lc = struct.pack(pkg_header_format, 0, epeerid, b"LC")
+                with lpeer_o_lock:
                     lpeer.sendall(lheader_lc)
-            elif lcmd == b"KL":  # keep-live
-                kl_deadline_sec = int(lpayload)
-                if kl_deadline is not None:
-                    kl_deadline.cancel()
-                kl_deadline = gevent.Timeout(seconds=kl_deadline_sec)
-                kl_deadline.start()
+        elif lcmd == b"KL":  # keep-live
+            shared_ctx["delay"] = int(lpayload)
 
+            if keeplive_let is None:
+                keeplive_let = gevent.spawn(keeplive_co, time.time(), shared_ctx, lpeer)
+
+            with lpeer_o_lock:
                 lpeer.sendall(lheader+lpayload)
-            elif lcmd == b"DP":  # data payload
-                eshadowpeer = shared_ctx["eshadowpeers"].get(epeerid, None)
-                if eshadowpeer is not None:
-                    try:
-                        eshadowpeer.sendall(lpayload)
-                    except m_socket.error:
-                        __shadow_close_cb__(eshadowpeer, epeerid, lpeer, shared_ctx, clet)
-                    print("|-written payload(len: {0}) to worker({1})".format(len(lpayload), eshadowpeer))
-            elif lcmd == b"LC":  # lost connection
-                LOG.debug("|-lost connection, id: {0}".format(epeerid))
-                eshadowpeer = shared_ctx["eshadowpeers"].get(epeerid, None)
-                if eshadowpeer is not None:
-                    eshadowpeer.close()
-            else:
-                raise ValueError("unsupported command:", lheader, lpayload)
-    except gevent.Timeout as e:
-        if e == kl_deadline:
-            keep_live_deadline_cb(clet)
+        elif lcmd == b"DP":  # data payload
+            eshadowpeer = shared_ctx["eshadowpeers"].get(epeerid, None)
+            if eshadowpeer is not None:
+                eshadowpeer.sendall(lpayload)
+                print("|-written payload(len: {0}) to worker({1})".format(len(lpayload), eshadowpeer))
+        elif lcmd == b"LC":  # lost connection
+            LOG.debug("|-lost connection, id: {0}".format(epeerid))
+            eshadowpeer = shared_ctx["eshadowpeers"].get(epeerid, None)
+            if eshadowpeer is not None:
+                eshadowpeer.close()
         else:
-            raise
+            raise ValueError("unsupported command:", lheader, lpayload)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
