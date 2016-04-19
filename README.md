@@ -5,6 +5,9 @@
 ## -v persist_path:/opt/platform/dbop/logs
 需要使用-v为container指定/opt/platform/dbop/logs的persist存储路径
 
+## 示一例
+docker run -v /home/ops/game/dbop/logs:/opt/platform/dbop/logs dbop
+
 # curl参数传递
 参数使用POST传递
 
