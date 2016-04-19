@@ -2,6 +2,9 @@
 ## -d
 需要使用-d参数指定container后台运行
 
+## -v persist_path:/opt/platform/dbop/logs
+需要使用-v为container指定/opt/platform/dbop/logs的persist存储路径
+
 # curl参数传递
 参数使用POST传递
 
