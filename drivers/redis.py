@@ -75,10 +75,20 @@ def update(dbname, tname, opcols, oplockcols, matchcols, cols):
                 hmsetkv[opcol_name] = opcol_value
             elif opcol_opcode == popc_add:  # +
                 LOG.debug("|-hincrby: key({0}) field({1}) value({2})".format(fullkey4hmset, opcol_name, opcol_value))
-                ret[opcolctx[1]] = m_configs_db.red.hincrby(fullkey4hmset, opcol_name, opcol_value)
+                if opcolctx[2] == vt_integer:
+                    ret[opcolctx[1]] = m_configs_db.red.hincrby(fullkey4hmset, opcol_name, opcol_value)
+                elif opcolctx[2] == vt_float:
+                    ret[opcolctx[1]] = m_configs_db.red.hincrbyfloat(fullkey4hmset, opcol_name, opcol_value)
+                else:
+                    raise ValueError("unsupported + for data type, opcolctx:", opcolctx)
             elif opcol_opcode == popc_sub:  # -
                 LOG.debug("|-hincrby: key({0}) field({1}) value({2})".format(fullkey4hmset, opcol_name, -opcol_value))
-                ret[opcolctx[1]] = m_configs_db.red.hincrby(fullkey4hmset, opcol_name, -opcol_value)
+                if opcolctx[2] == vt_integer:
+                    ret[opcolctx[1]] = m_configs_db.red.hincrby(fullkey4hmset, opcol_name, -opcol_value)
+                elif opcolctx[2] == vt_float:
+                    ret[opcolctx[1]] = m_configs_db.red.hincrbyfloat(fullkey4hmset, opcol_name, -opcol_value)
+                else:
+                    raise ValueError("unsupported - for data type, opcolctx:", opcolctx)
             else:
                 raise NotImplemented
         elif opcolctx[0] == col_stype_list:
@@ -131,14 +141,17 @@ def update(dbname, tname, opcols, oplockcols, matchcols, cols):
 
 
 @gen.coroutine
-def delete(dbname, tname, matchcols, cols):
+def delete(dbname, tname, delcols, matchcols, cols):
+    if len(delcols) == 0:
+        delcols = tuple(cols.keys())
     matchkey = make_matchkey(matchcols)
     hmsetkey = make_hmsetkey(dbname, tname, matchkey)  # 10=uid&@users:wealthempire
     orphankeys = []
-    for colname, colctx in cols.items():
-        if colctx[0] == col_stype_bare or colctx[0] == col_stype_list or\
-                        colctx[0] == col_stype_set or colctx[0] == col_stype_sset:
-            orphankey = make_orphankey(dbname, tname, colname, matchkey)
+    for delcol in delcols:
+        delcolctx = cols[delcol]
+        if delcolctx[0] == col_stype_bare or delcolctx[0] == col_stype_list or\
+                        delcolctx[0] == col_stype_set or delcolctx[0] == col_stype_sset:
+            orphankey = make_orphankey(dbname, tname, delcol, matchkey)
             orphankeys.append(orphankey)
     return m_configs_db.red.delete(hmsetkey, *orphankeys)
 
@@ -179,6 +192,8 @@ def get(dbname, tname, getcols, matchcols, cols):
                 setkeykw[orphankey] = colname
             elif colctx[0] == col_stype_sset:
                 ssetkeykw[orphankey] = colname
+    LOG.debug("|-get hmgetfileds: {0}, barekeykw: {1}, listkeykw: {2}, setkeykw: {3}, ssetkeykw: {4}"
+              .format(hmgetfields, barekeykw, listkeykw, setkeykw, ssetkeykw))
     colpv = {}  # col pos: col value
     if len(hmgetfields) != 0:
         hmgetvalues = m_configs_db.red.hmget(hmgetkey, hmgetfields)
@@ -186,6 +201,8 @@ def get(dbname, tname, getcols, matchcols, cols):
             colctx = cols[hmgetfield]
             if colctx[2] == vt_integer:
                 colpv[colctx[1]] = int(hmgetvalue) if hmgetvalue is not None else 0
+            elif colctx[2] == vt_float:
+                colpv[colctx[1]] = float(hmgetvalue) if hmgetvalue is not None else 0.0
             elif colctx[2] == vt_text:
                 colpv[colctx[1]] = hmgetvalue.decode() if hmgetvalue is not None else ""
             else:
@@ -197,6 +214,8 @@ def get(dbname, tname, getcols, matchcols, cols):
             colctx = cols[barekeykw[barekey]]
             if colctx[2] == vt_integer:
                 colpv[colctx[1]] = int(barevalue) if barevalue is not None else 0
+            elif colctx[2] == vt_float:
+                colpv[colctx[1]] = float(barevalue) if barevalue is not None else 0.0
             elif colctx[2] == vt_text:
                 colpv[colctx[1]] = barevalue.decode() if barevalue is not None else ""
             else:
@@ -206,6 +225,8 @@ def get(dbname, tname, getcols, matchcols, cols):
         listkeyvalues = m_configs_db.red.lrange(listkeyk, 0, -1)
         if colctx[2] == vt_integer:
             listkeyvalues = tuple(map(lambda lv: int(lv), listkeyvalues))
+        elif colctx[2] == vt_float:
+            listkeyvalues = tuple(map(lambda lv: float(lv), listkeyvalues))
         elif colctx[2] == vt_text:
             listkeyvalues = tuple(map(lambda lv: lv.decode(), listkeyvalues))
         else:
@@ -216,6 +237,8 @@ def get(dbname, tname, getcols, matchcols, cols):
         setkeyvalues = m_configs_db.red.smembers(setkeyk)
         if colctx[2] == vt_integer:
             setkeyvalues = tuple(map(lambda sv: int(sv), setkeyvalues))
+        elif colctx[2] == vt_float:
+            setkeyvalues = tuple(map(lambda sv: float(sv), setkeyvalues))
         elif colctx[2] == vt_text:
             setkeyvalues = tuple(map(lambda sv: sv.decode(), setkeyvalues))
         else:
@@ -226,6 +249,8 @@ def get(dbname, tname, getcols, matchcols, cols):
         ssetkeyvalues = m_configs_db.red.zrange(ssetkeyk, 0, -1)
         if colctx[2] == vt_integer:
             ssetkeyvalues = tuple(map(lambda ssv: int(ssv), ssetkeyvalues))
+        elif colctx[2] == vt_float:
+            ssetkeyvalues = tuple(map(lambda ssv: float(ssv), ssetkeyvalues))
         elif colctx[2] == vt_text:
             ssetkeyvalues = tuple(map(lambda ssv: ssv.decode(), ssetkeyvalues))
         else:

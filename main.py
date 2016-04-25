@@ -54,6 +54,7 @@ __stype_text2value__ = {
 __vtype_text2value__ = {
     "int": vt_integer,
     "text": vt_text,
+    "float": vt_float,
 }
 
 
@@ -226,8 +227,26 @@ class DBOPServer(tcpserver.TCPServer):
                                     raise ValueError("get column not found:", getcol_name, "@tablename:", tablename, "@dbname:", dbname)
                             getcols.append(getcol_name)
                         LOG.debug("getcols: {0}".format(getcols))
+                    elif op_code == opc_delete:
+                        delcols = []
+                        while True:
+                            delcol_name, delcol_name_consumed = parse_value(payload, baseoffset)
+                            baseoffset += delcol_name_consumed
+                            if delcol_name is None:
+                                break
+                            if isinstance(delcol_name, int):  # column pos
+                                colsctx = tablenamectx["columns"]
+                                for colname, colctx in colsctx.items():
+                                    if colctx[1] == delcol_name:
+                                        delcol_name = colname
+                                        break
+                                else:
+                                    payload = (str(errno_column_not_found)+"|"+dbname+":"+tablename+":"+str(delcol_name)).encode()
+                                    raise ValueError("get column not found:", delcol_name, "@tablename:", tablename, "@dbname:", dbname)
+                            delcols.append(delcol_name)
+                        LOG.debug("|-del cols: {0}".format(delcols))
                     else:
-                        raise NotImplemented
+                        raise NotImplementedError()
                     matchcols = []  # (name, value, match_type, match_relation)
                     # match columns
                     while True:
@@ -251,7 +270,7 @@ class DBOPServer(tcpserver.TCPServer):
                         match_relation = payload[baseoffset]
                         baseoffset += 1
                         matchcols.append((matchcol_name, matchcol_value, match_type, match_relation))
-                    LOG.debug("matchcols: {0}".format(matchcols))
+                    LOG.debug("|-matchcols: {0}".format(matchcols))
 
                     if op_code == opc_update:
                         if m_configs_db.driver == drivers.driver_redis:
@@ -259,12 +278,17 @@ class DBOPServer(tcpserver.TCPServer):
                         elif m_configs_db.driver == drivers.driver_mysql:
                             payload = yield m_d_mysql.update(dbname, tablename, opcols, oplockcols, matchcols, tablenamectx["columns"])
                         else:
-                            raise NotImplemented
+                            raise NotImplementedError()
                     elif op_code == opc_get:
                         if m_configs_db.driver == drivers.driver_redis:
                             payload = yield m_d_redis.get(dbname, tablename, getcols, matchcols, tablenamectx["columns"])
                         else:
-                            raise NotImplemented
+                            raise NotImplementedError()
+                    elif op_code == opc_delete:
+                        if m_configs_db.driver == drivers.driver_redis:
+                            payload = yield m_d_redis.delete(dbname, tablename, delcols, matchcols, tablenamectx["columns"])
+                        else:
+                            raise NotImplementedError()
                     payload = b"0|"+json.dumps(payload).encode()
             except Exception as e:
                 import traceback

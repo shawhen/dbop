@@ -35,7 +35,7 @@ popc_replace = 103
 
 # for list
 popc_extend = 201  # append some values at the tail
-popc_remove = 202  # remove some values from left2right
+popc_remove = 202  # remove a value from left2right
 
 # for set
 popc_sadd = 51  # add some values into the set
@@ -47,6 +47,7 @@ vt_text = 1  # utf-8 encoded
 vt_binary = 2
 
 vt_list = 3
+vt_float = 4
 
 vt_space = 255
 
@@ -115,6 +116,8 @@ def parse_value(data, baseoffset=0):
         value = None
 
         return value, 1
+    elif data[0] == vt_float:
+        value = struct.unpack(">d", data[3:3+value_len].rjust(8))[0]
     else:
         raise NotImplemented
     return value, 3+value_len
@@ -136,5 +139,7 @@ def serialize_value(value):
             valuebytes = serialize_value(valuei)
             vv_bytes += valuebytes
         return vt_bytes+struct.pack(">H", len(vv_bytes))+vv_bytes
+    elif isinstance(value, float):
+        return bytes([vt_float])+struct.pack(">Hd", 8, value)
     else:
-        raise NotImplemented
+        raise TypeError("unsupported value:", value, "type:", type(value))
