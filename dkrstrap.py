@@ -39,12 +39,13 @@ def setup():
         node = request.form["node"]
         db_host = request.form["db_host"]
         db_port = int(request.form["db_port"])
+        listen_host = request.form.get("listen_host", "localhost")
         listen_port = int(request.form.get("listen_port", 32001))
 
         if dbop_server_p is not None:
             dbop_server_p.terminate()
-        dbop_server_p = subprocess.Popen("python3.4 main.py --listen_port {listen_port} --node {node} --dbhost {dbhost} --dbport {dbport}"
-                                         .format(listen_port=listen_port, node=node, dbhost=db_host, dbport=db_port), shell=True)
+        dbop_server_p = subprocess.Popen("python3.4 main.py --listen_host {listen_host} --listen_port {listen_port} --node {node} --dbhost {dbhost} --dbport {dbport}"
+                                         .format(listen_host=listen_host, listen_port=listen_port, node=node, dbhost=db_host, dbport=db_port), shell=True)
 
         if slavep is not None:
             slavep.terminate()

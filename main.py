@@ -304,7 +304,7 @@ class DBOPServer(tcpserver.TCPServer):
                     pass
 
 
-def boot(listen_port, node, db_host, db_port):
+def boot(listen_host, listen_port, node, db_host, db_port):
     """
 
     :param listen_port:
@@ -326,15 +326,16 @@ def boot(listen_port, node, db_host, db_port):
 
     io_loop = ioloop.IOLoop.current()
     dbopserver = DBOPServer()
-    dbopserver.listen(listen_port)
+    dbopserver.listen(listen_port, address=listen_host)
     io_loop.start()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--listen_host", help="the listen host")
     parser.add_argument("--listen_port", help="the listen port")
     parser.add_argument("--node", help="redis op or mysql op")
     parser.add_argument("--dbhost", help="the real database's host")
     parser.add_argument("--dbport", help="the real database's port")
     args = parser.parse_args()
 
-    boot(args.listen_port, args.node, args.dbhost, args.dbport)
+    boot(args.listen_host, args.listen_port, args.node, args.dbhost, args.dbport)
