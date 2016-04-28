@@ -1,6 +1,6 @@
 FROM base-centos7
 MAINTAINER zig
-RUN yum install gcc -y && yum install supervisor -y && yum install python34 -y && yum install python34-devel -y && yum install python34-setuptools -y
+RUN yum install gcc -y && yum install supervisor -y && yum install python34 -y && yum install python34-devel -y && yum install python34-setuptools -y && yum install net-tools -y
 RUN easy_install-3.4 pip
 COPY . /opt/platform/dbop/
 RUN cd /opt/platform/dbop && pip3.4 install -r requirements.txt
